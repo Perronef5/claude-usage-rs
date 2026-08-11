@@ -1098,11 +1098,17 @@ enum Cmd {
         #[command(subcommand)]
         action: Option<AwakeCmd>,
     },
-    /// SwiftBar/xbar menu bar plugin: print one menu refresh, or --install
+    /// macOS menu bar UI (native app, JSON bridge, or SwiftBar compatibility)
     Menubar {
-        /// Install the plugin into the SwiftBar plugin directory
-        #[arg(long)]
+        /// Build, install, and launch the native menu bar app
+        #[arg(long, conflicts_with_all = ["install_swiftbar", "json"])]
         install: bool,
+        /// Install the legacy SwiftBar plugin instead of the native app
+        #[arg(long = "install-swiftbar", conflicts_with_all = ["install", "json"])]
+        install_swiftbar: bool,
+        /// Print the compact snapshot consumed by the native menu bar app
+        #[arg(long, conflicts_with_all = ["install", "install_swiftbar"])]
+        json: bool,
     },
 }
 
@@ -1174,9 +1180,20 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
-    if let Cmd::Menubar { install } = cmd {
+    if let Cmd::Menubar {
+        install,
+        install_swiftbar,
+        json,
+    } = cmd
+    {
         if install {
-            return menubar::install_plugin();
+            return menubar::install_native_app();
+        }
+        if install_swiftbar {
+            return menubar::install_swiftbar_plugin();
+        }
+        if json {
+            return menubar::run_native_json();
         }
         menubar::run_menubar();
         return Ok(());

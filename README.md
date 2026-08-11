@@ -122,7 +122,7 @@ claude-usage wait         # block until a favorable window opens
 claude-usage loops        # list ralph + /goal loops (--json for machines)
 claude-usage loops --serve --open   # web dashboard for loops (port 4711)
 claude-usage awake on     # keep the machine awake (Amphetamine-style)
-claude-usage menubar --install      # put loops + keep-awake in the menu bar
+claude-usage menubar --install      # install the native macOS menu bar app
 ```
 
 ## Loop dashboard
@@ -148,36 +148,53 @@ transcripts.
 
 ## Menu bar (macOS)
 
-The same loop state lives in the menu bar as a [SwiftBar](https://swiftbar.app)
-plugin — `🔁 14/14` in the bar, hover a loop for its last event, click through
-to the per-stage submenu with task tallies, toggle keep-awake, and jump to the
-dashboard:
+The native menu app turns the same local state into a compact command center.
+Its translucent system menu has provider-style **Codex** and **Claude** tabs,
+plus a **Work** tab for Ralph loops and live Claude sessions. Keep-awake, the
+loop dashboard, refresh, and both provider status pages stay one click away.
+
+```sh
+claude-usage menubar --install
+```
+
+The installer compiles a small AppKit/SwiftUI companion into
+`~/Applications/Claude Usage.app` and launches it. macOS 14+ and Xcode Command
+Line Tools are required for this source install. The companion contains no
+account or parsing logic: it refreshes the local `claude-usage menubar --json`
+snapshot every minute, leaving the Rust CLI as the source of truth.
+
+Claude usage bars come from the snapshot the statusline persists on every
+Claude Code turn (`statusline-cache.json`), so the statusline must be
+registered for 5h/7d limits, context, and session cost to appear. Codex usage
+comes directly from the signed-in Codex CLI through its local read-only
+app-server API; GUI launches also discover Codex installations managed by nvm.
+
+The native views stay tidy on their own: running loops always show, recent
+stopped loops remain for 3 days, and older activity collapses into a dashboard
+count. Sessions surface their live goal or latest message without turning the
+menu into a transcript viewer.
+
+The Codex and Claude provider marks are adapted from
+[CodexBar](https://github.com/steipete/CodexBar) under its MIT license.
+
+Prefer SwiftBar/xbar? The original plaintext integration remains available:
 
 ```sh
 brew install --cask swiftbar
-claude-usage menubar --install   # writes the plugin, registers the folder
+claude-usage menubar --install-swiftbar
 open -a SwiftBar
 ```
 
-The dropdown opens with a usage block: active promo window, 5h/7d rate-limit
-bars with pacing markers and reset countdowns, session cost and burn rate,
-and daily/weekly token totals. Rate limits come from a snapshot the
-statusline persists on every Claude Code turn (`statusline-cache.json`), so
-the statusline must be registered for those bars to appear. Icons are SF
-Symbols (SwiftBar's `sfimage`), crisp on any display and auto-tinted for
-light/dark menus.
+The SwiftBar fallback preserves the original per-stage submenus, stopped-loop
+**Dismiss** action (`claude-usage loops dismiss <name>`), and verified session
+**Quit** action (`claude-usage loops quit <pid>`). Quitting sends SIGTERM only
+to registered Claude processes; the transcript survives and `claude --resume`
+restores the conversation. Dismissed loops reappear automatically if they run
+again.
 
-The menu stays tidy on its own: running loops always show, stopped loops fade
-out after 3 days (they remain in the CLI and dashboard), and each stopped
-loop's submenu has a **Dismiss** action (`claude-usage loops dismiss <name>`)
-— dismissed loops come back automatically if they run again. Idle sessions
-can be quit right from their submenu (`claude-usage loops quit <pid>`), which
-SIGTERMs only verified, registered Claude processes; the transcript survives
-and `claude --resume` restores the conversation.
-
-The plugin refreshes every 15s (`claude-usage-loops.15s.sh` — rename to
-change). `claude-usage menubar` prints one refresh, so you can also use it
-with xbar or anything that speaks the same format.
+That plugin refreshes every 15s (`claude-usage-loops.15s.sh` — rename to
+change). `claude-usage menubar` still prints one SwiftBar refresh, so it also
+works with xbar or anything that speaks the same format.
 
 ## Keep awake (Amphetamine equivalent)
 
