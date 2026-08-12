@@ -28,16 +28,23 @@ fn state_path() -> Option<PathBuf> {
     crate::claude_config_dir().map(|d| d.join("keep-awake.json"))
 }
 
+/// `sudo pmset -a disablesleep {1|0}` — the closed-lid override. Returns
+/// whether the command succeeded (sudo may be declined).
+#[cfg(target_os = "macos")]
+fn set_disablesleep(on: bool) -> bool {
+    std::process::Command::new("sudo")
+        .args(["pmset", "-a", "disablesleep", if on { "1" } else { "0" }])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// Current state, validated against the process table. A dead blocker's
 /// state file is cleaned up (lid mode is left alone — pmset outlives us).
 pub fn status() -> Option<AwakeState> {
     let path = state_path()?;
     let state: AwakeState = serde_json::from_str(&fs::read_to_string(&path).ok()?).ok()?;
-    let alive = std::process::Command::new("ps")
-        .args(["-p", &state.pid.to_string(), "-o", "pid="])
-        .output()
-        .is_ok_and(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty());
-    if alive {
+    if crate::loops::pid_alive(state.pid) {
         Some(state)
     } else {
         if !state.lid {
@@ -86,7 +93,7 @@ pub fn turn_on(duration_secs: Option<u64>, lid: bool) -> Result<AwakeState> {
     .stdout(Stdio::null())
     .stderr(Stdio::null())
     .spawn()
-    .map_err(|e| anyhow!("failed to start sleep blocker: {}", e))?;
+    .map_err(|e| anyhow!("failed to start sleep blocker: {e}"))?;
 
     if lid {
         #[cfg(target_os = "macos")]
@@ -94,12 +101,7 @@ pub fn turn_on(duration_secs: Option<u64>, lid: bool) -> Result<AwakeState> {
             eprintln!("Enabling closed-lid mode via `sudo pmset -a disablesleep 1`.");
             eprintln!("⚠️  The machine will NOT sleep at all until `claude-usage awake off`.");
             eprintln!("   Watch heat if it goes in a bag.");
-            let ok = std::process::Command::new("sudo")
-                .args(["pmset", "-a", "disablesleep", "1"])
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-            if !ok {
+            if !set_disablesleep(true) {
                 return Err(anyhow!("pmset disablesleep failed (sudo declined?)"));
             }
         }
@@ -109,8 +111,7 @@ pub fn turn_on(duration_secs: Option<u64>, lid: bool) -> Result<AwakeState> {
     let state = AwakeState {
         pid: child.id(),
         started: now.to_rfc3339(),
-        until: duration_secs
-            .map(|s| (now + chrono::Duration::seconds(s as i64)).to_rfc3339()),
+        until: duration_secs.map(|s| (now + chrono::Duration::seconds(s as i64)).to_rfc3339()),
         lid,
         method: if cfg!(target_os = "macos") {
             "caffeinate".into()
@@ -146,12 +147,7 @@ pub fn turn_off() -> Result<Option<String>> {
     if state.lid {
         #[cfg(target_os = "macos")]
         {
-            let ok = std::process::Command::new("sudo")
-                .args(["pmset", "-a", "disablesleep", "0"])
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-            if !ok {
+            if !set_disablesleep(false) {
                 warning = Some(
                     "could not revert lid mode — run `sudo pmset -a disablesleep 0` manually"
                         .to_string(),
@@ -180,18 +176,18 @@ pub fn parse_duration(s: &str) -> Result<u64> {
         } else {
             let n: u64 = num
                 .parse()
-                .map_err(|_| anyhow!("bad duration: {} (use 8h, 90m, 2h30m)", s))?;
+                .map_err(|_| anyhow!("bad duration: {s} (use 8h, 90m, 2h30m)"))?;
             total += match c {
                 'h' => n * 3600,
                 'm' => n * 60,
                 's' => n,
-                _ => return Err(anyhow!("bad duration unit '{}' (use h, m, s)", c)),
+                _ => return Err(anyhow!("bad duration unit '{c}' (use h, m, s)")),
             };
             num.clear();
         }
     }
     if !num.is_empty() {
-        return Err(anyhow!("bad duration: {} (trailing number)", s));
+        return Err(anyhow!("bad duration: {s} (trailing number)"));
     }
     if total == 0 {
         return Err(anyhow!("duration must be > 0"));
@@ -212,7 +208,12 @@ pub fn print_status() {
                 .until
                 .as_deref()
                 .and_then(|u| u.parse::<DateTime<Utc>>().ok())
-                .map(|t| format!(", {} left", crate::fmt_mins(((t - now).num_minutes().max(0)) as u32)))
+                .map(|t| {
+                    format!(
+                        ", {} left",
+                        crate::fmt_mins(((t - now).num_minutes().max(0)) as u32)
+                    )
+                })
                 .unwrap_or_default();
             println!(
                 "☕ Awake ({}, {} elapsed{}){}",

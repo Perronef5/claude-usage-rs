@@ -23,9 +23,9 @@ const DASHBOARD_HTML: &str = include_str!("../assets/dashboard.html");
 
 pub fn serve(port: u16, roots: Vec<PathBuf>, open: bool) -> Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", port))
-        .with_context(|| format!("failed to bind 127.0.0.1:{}", port))?;
-    let url = format!("http://127.0.0.1:{}", port);
-    println!("🔁 Loop dashboard: {}", url);
+        .with_context(|| format!("failed to bind 127.0.0.1:{port}"))?;
+    let url = format!("http://127.0.0.1:{port}");
+    println!("🔁 Loop dashboard: {url}");
     println!("   Scanning: .ralph loops + ~/.claude/sessions (refresh every few seconds)");
 
     if open {
@@ -40,6 +40,9 @@ pub fn serve(port: u16, roots: Vec<PathBuf>, open: bool) -> Result<()> {
 
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
+        let timeout = Some(std::time::Duration::from_secs(5));
+        let _ = stream.set_read_timeout(timeout);
+        let _ = stream.set_write_timeout(timeout);
         let cache = Arc::clone(&cache);
         let roots = Arc::clone(&roots);
         std::thread::spawn(move || {
@@ -49,11 +52,7 @@ pub fn serve(port: u16, roots: Vec<PathBuf>, open: bool) -> Result<()> {
     Ok(())
 }
 
-fn handle(
-    mut stream: TcpStream,
-    roots: &[PathBuf],
-    cache: &Mutex<loops::ScanCache>,
-) -> Result<()> {
+fn handle(mut stream: TcpStream, roots: &[PathBuf], cache: &Mutex<loops::ScanCache>) -> Result<()> {
     let mut buf = Vec::with_capacity(2048);
     let mut chunk = [0u8; 2048];
     // Read until end of headers
@@ -82,6 +81,11 @@ fn handle(
         .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
         .and_then(|(_, v)| v.trim().parse().ok())
         .unwrap_or(0);
+    // The only POST body is a tiny `{"on":bool}`; cap it so a bogus
+    // Content-Length can't drive an unbounded read.
+    if content_length > 64 * 1024 {
+        return respond(&mut stream, 400, "text/plain", "request body too large");
+    }
     let mut body = buf[header_end..].to_vec();
     while body.len() < content_length {
         let n = stream.read(&mut chunk)?;
@@ -95,7 +99,11 @@ fn handle(
         ("GET", "/") => respond(&mut stream, 200, "text/html; charset=utf-8", DASHBOARD_HTML),
         ("GET", "/api/loops") => {
             let loops = {
-                let mut c = cache.lock().unwrap();
+                // Recover the guard through poison — a handler panic must not
+                // wedge the endpoint for the server's lifetime.
+                let mut c = cache
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 loops::collect_loops(roots, &mut c)
             };
             let payload = serde_json::json!({
@@ -106,8 +114,12 @@ fn handle(
             respond(&mut stream, 200, "application/json", &payload.to_string())
         }
         ("POST", "/api/awake") => {
-            let req: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
-            let on = req.get("on").and_then(|v| v.as_bool()).unwrap_or(false);
+            let on = serde_json::from_slice::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|v| v.get("on").and_then(serde_json::Value::as_bool));
+            let Some(on) = on else {
+                return respond(&mut stream, 400, "text/plain", "expected {\"on\": bool}");
+            };
             let warning = if on {
                 // never lid mode from the web UI — that path needs sudo
                 awake::turn_on(None, false).err().map(|e| e.to_string())
@@ -140,6 +152,7 @@ fn awake_json() -> serde_json::Value {
 fn respond(stream: &mut TcpStream, code: u16, ctype: &str, body: &str) -> Result<()> {
     let status = match code {
         200 => "200 OK",
+        400 => "400 Bad Request",
         404 => "404 Not Found",
         _ => "500 Internal Server Error",
     };
@@ -156,7 +169,5 @@ fn respond(stream: &mut TcpStream, code: u16, ctype: &str, body: &str) -> Result
 }
 
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|w| w == needle)
+    haystack.windows(needle.len()).position(|w| w == needle)
 }

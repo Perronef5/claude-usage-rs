@@ -34,6 +34,15 @@ const NATIVE_STATUS_ICON: &[u8] = include_bytes!("../native/StatusIcon-ai.svg");
 const NATIVE_CODEX_ICON: &[u8] = include_bytes!("../native/ProviderIcon-codex.svg");
 const NATIVE_CLAUDE_ICON: &[u8] = include_bytes!("../native/ProviderIcon-claude.svg");
 
+// Threshold colors — one hex per level, shared by the meter lines (via
+// usage_color) and the fixed-semantic lines (off-peak/peak/incident). See
+// usage_color for the light/dark-legibility rationale behind the values.
+const GREEN: &str = "#0a8f0a";
+const AMBER: &str = "#b37400";
+const RED: &str = "#d64545";
+
+const WEEK_SECS: i64 = 604_800;
+
 /// SwiftBar item text must not contain the param delimiter, newlines, or
 /// double quotes (which would close a quoted param value).
 fn clean(s: &str) -> String {
@@ -41,7 +50,7 @@ fn clean(s: &str) -> String {
 }
 
 fn sf(name: &str) -> String {
-    format!(" sfimage={}", name)
+    format!(" sfimage={name}")
 }
 
 fn exe() -> String {
@@ -88,11 +97,11 @@ fn pct_meter(pct: f64) -> String {
 /// SF Symbol dot doubles the cue so the state never rides on text tint alone.
 fn usage_color(pct: f64) -> &'static str {
     if pct < 50.0 {
-        "#0a8f0a"
+        GREEN
     } else if pct < 80.0 {
-        "#b37400"
+        AMBER
     } else {
-        "#d64545"
+        RED
     }
 }
 
@@ -108,13 +117,14 @@ fn print_usage(now: chrono::DateTime<chrono::Utc>) {
         if !s.active_windows.is_empty() {
             // "1x off-peak" reads like a bug — name the multiplier only when
             // it actually multiplies
-            let mult = (s.multiplier != 1.0)
-                .then(|| format!("{:.0}x ", s.multiplier))
-                .unwrap_or_default();
+            let mult = if s.multiplier != 1.0 {
+                format!("{:.0}x ", s.multiplier)
+            } else {
+                Default::default()
+            };
             if s.favorable {
                 lines.push(format!(
-                    "{}off-peak · ends in {} |{} sfcolor=#0a8f0a color=#0a8f0a",
-                    mult,
+                    "{mult}off-peak · ends in {} |{} sfcolor={GREEN} color={GREEN}",
                     crate::fmt_mins_opt(s.mins_until_change),
                     sf("bolt.fill")
                 ));
@@ -127,9 +137,7 @@ fn print_usage(now: chrono::DateTime<chrono::Utc>) {
                     .next()
                     .unwrap_or(2.0);
                 lines.push(format!(
-                    "{}peak · {:.0}x in {} |{} sfcolor=#b37400 color=#b37400",
-                    mult,
-                    next,
+                    "{mult}peak · {next:.0}x in {} |{} sfcolor={AMBER} color={AMBER}",
                     crate::fmt_mins_opt(s.mins_until_favorable),
                     sf("clock")
                 ));
@@ -145,11 +153,11 @@ fn print_usage(now: chrono::DateTime<chrono::Utc>) {
         .unwrap_or(i64::MAX);
     if let Some(c) = &cache {
         let now_ts = now.timestamp();
-        let windows: [(&str, Option<f64>, Option<i64>, i64); 2] = [
-            ("5h", c.five_hour_pct, c.five_hour_resets_at, 18_000),
-            ("7d", c.seven_day_pct, c.seven_day_resets_at, 604_800),
+        let windows: [(&str, Option<f64>, Option<i64>); 2] = [
+            ("5h", c.five_hour_pct, c.five_hour_resets_at),
+            ("7d", c.seven_day_pct, c.seven_day_resets_at),
         ];
-        for (label, pct, resets_at, _duration) in windows {
+        for (label, pct, resets_at) in windows {
             let Some(pct) = pct else { continue };
             let reset = resets_at
                 .filter(|&ts| ts > now_ts)
@@ -169,12 +177,12 @@ fn print_usage(now: chrono::DateTime<chrono::Utc>) {
         // pace verdict off the 7d window, like CodexBar's "Pace: Behind"
         if let (Some(pct), Some(ts)) = (c.seven_day_pct, c.seven_day_resets_at) {
             if ts > now_ts {
-                let elapsed = 604_800 - (ts - now_ts);
-                let pace = (elapsed as f64 / 604_800.0 * 100.0).clamp(0.0, 100.0);
+                let elapsed = WEEK_SECS - (ts - now_ts);
+                let pace = (elapsed as f64 / WEEK_SECS as f64 * 100.0).clamp(0.0, 100.0);
                 let delta = pct - pace;
                 let word = if delta > 1.0 { "ahead" } else { "behind" };
                 if delta.abs() > 1.0 {
-                    lines.push(format!("pace: {} ({:+.0}%) | size=12", word, delta));
+                    lines.push(format!("pace: {word} ({delta:+.0}%) | size=12"));
                 }
             }
         }
@@ -208,7 +216,7 @@ fn print_usage(now: chrono::DateTime<chrono::Utc>) {
                         )
                     })
                     .unwrap_or_default();
-                lines.push(format!("{} ~${:.2}{}", label, total, rate));
+                lines.push(format!("{label} ~${total:.2}{rate}"));
             }
         } else if age_mins < i64::MAX {
             lines.push(format!(
@@ -240,7 +248,7 @@ fn print_usage(now: chrono::DateTime<chrono::Utc>) {
     if let Some(api) = crate::load_cached_api_status() {
         if api.indicator != "none" && api.indicator != "unknown" {
             lines.push(format!(
-                "API: {} |{} sfcolor=#d64545 color=#d64545 href=https://status.claude.com",
+                "API: {} |{} sfcolor={RED} color={RED} href=https://status.claude.com",
                 clean(&api.description),
                 sf("exclamationmark.triangle")
             ));
@@ -250,7 +258,7 @@ fn print_usage(now: chrono::DateTime<chrono::Utc>) {
     if !lines.is_empty() {
         println!("Claude Usage | size=11");
         for l in lines {
-            println!("{}", l);
+            println!("{l}");
         }
         println!("---");
     }
@@ -276,7 +284,10 @@ pub fn run_menubar() {
         .filter(|l| !l.running && hours_since(l.updated.as_deref(), now) <= 72)
         .copied()
         .collect();
-    let older = ralphs.len() - running.len() - recent.len();
+    let older = ralphs
+        .len()
+        .saturating_sub(running.len())
+        .saturating_sub(recent.len());
     let sessions: Vec<_> = all.iter().filter(|l| l.kind != "ralph").collect();
 
     // ── Title ──────────────────────────────────────────────────────────────
@@ -312,7 +323,7 @@ pub fn run_menubar() {
         if let Some(s) = &l.stage {
             text.push_str(&format!("  ·  stage {}/{}", s.current, s.total));
             if let Some(t) = &s.title {
-                text.push_str(&format!(" — {}", t));
+                text.push_str(&format!(" — {t}"));
             }
         } else if !l.running {
             text.push_str(&format!("  ·  {}", l.state));
@@ -380,13 +391,13 @@ pub fn run_menubar() {
             );
             if let Some(s) = &l.stage {
                 if let (Some(a), Some(b)) = (s.step, s.step_total) {
-                    bar.push_str(&format!(" · step {}/{}", a, b));
+                    bar.push_str(&format!(" · step {a}/{b}"));
                 }
                 if let Some(i) = l.iteration {
-                    bar.push_str(&format!(" · it {}", i));
+                    bar.push_str(&format!(" · it {i}"));
                 }
             }
-            println!("{} | size=12", bar);
+            println!("{bar} | size=12");
         }
     }
     if older > 0 {
@@ -395,7 +406,7 @@ pub fn run_menubar() {
         } else {
             ""
         };
-        println!("{} older in the dashboard | size=12{}", older, action);
+        println!("{older} older in the dashboard | size=12{action}");
     }
 
     // ── Sessions ───────────────────────────────────────────────────────────
@@ -463,8 +474,7 @@ pub fn run_menubar() {
                 sf("moon.zzz")
             );
             println!(
-                "-- with closed-lid support (sudo) | bash=\"{}\" param1=awake param2=on param3=--lid terminal=true refresh=true",
-                exe
+                "-- with closed-lid support (sudo) | bash=\"{exe}\" param1=awake param2=on param3=--lid terminal=true refresh=true"
             );
         }
     }
@@ -1046,9 +1056,11 @@ fn collect_native_usage(now: chrono::DateTime<chrono::Utc>) -> NativeUsageSnapsh
             if status.active_windows.is_empty() {
                 return (None, None, status.favorable, status.multiplier);
             }
-            let prefix = (status.multiplier != 1.0)
-                .then(|| format!("{:.0}× ", status.multiplier))
-                .unwrap_or_default();
+            let prefix = if status.multiplier != 1.0 {
+                format!("{:.0}× ", status.multiplier)
+            } else {
+                String::new()
+            };
             if status.favorable {
                 (
                     Some(format!("{}off-peak", prefix)),
