@@ -153,11 +153,11 @@ fn print_usage(now: chrono::DateTime<chrono::Utc>) {
         .unwrap_or(i64::MAX);
     if let Some(c) = &cache {
         let now_ts = now.timestamp();
-        let windows: [(&str, Option<f64>, Option<i64>, i64); 2] = [
-            ("5h", c.five_hour_pct, c.five_hour_resets_at, 18_000),
-            ("7d", c.seven_day_pct, c.seven_day_resets_at, 604_800),
+        let windows: [(&str, Option<f64>, Option<i64>); 2] = [
+            ("5h", c.five_hour_pct, c.five_hour_resets_at),
+            ("7d", c.seven_day_pct, c.seven_day_resets_at),
         ];
-        for (label, pct, resets_at, _duration) in windows {
+        for (label, pct, resets_at) in windows {
             let Some(pct) = pct else { continue };
             let reset = resets_at
                 .filter(|&ts| ts > now_ts)
