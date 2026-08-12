@@ -308,7 +308,16 @@ fn save_statusline_cache(cc: &StatuslineInput, now: DateTime<Utc>) {
         }
     }
     if let Ok(json) = serde_json::to_string_pretty(&c) {
-        let _ = fs::write(path, json);
+        // Write to a per-process temp file then atomically rename: concurrent
+        // sessions each tick the statusline, and a reader that caught a
+        // half-written file would parse it as empty and wipe every other
+        // session's totals on its next write.
+        let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
+        if fs::write(&tmp, json).is_ok() {
+            let _ = fs::rename(&tmp, &path);
+        } else {
+            let _ = fs::remove_file(&tmp);
+        }
     }
 }
 
