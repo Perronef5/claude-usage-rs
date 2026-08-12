@@ -1056,9 +1056,11 @@ fn collect_native_usage(now: chrono::DateTime<chrono::Utc>) -> NativeUsageSnapsh
             if status.active_windows.is_empty() {
                 return (None, None, status.favorable, status.multiplier);
             }
-            let prefix = (status.multiplier != 1.0)
-                .then(|| format!("{:.0}× ", status.multiplier))
-                .unwrap_or_default();
+            let prefix = if status.multiplier != 1.0 {
+                format!("{:.0}× ", status.multiplier)
+            } else {
+                String::new()
+            };
             if status.favorable {
                 (
                     Some(format!("{}off-peak", prefix)),
