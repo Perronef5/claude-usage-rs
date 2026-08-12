@@ -819,7 +819,7 @@ fn parse_sessions(cache: &mut ScanCache) -> Vec<LoopInfo> {
 /// activity timestamp, and a short feed of recent messages. Only complete
 /// (newline-terminated) lines are consumed; a partial trailing line is left
 /// for the next scan.
-pub fn scan_transcript(path: &Path, state: &mut ScanState) {
+fn scan_transcript(path: &Path, state: &mut ScanState) {
     let Ok(mut f) = fs::File::open(path) else {
         return;
     };

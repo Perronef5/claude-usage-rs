@@ -284,7 +284,10 @@ pub fn run_menubar() {
         .filter(|l| !l.running && hours_since(l.updated.as_deref(), now) <= 72)
         .copied()
         .collect();
-    let older = ralphs.len() - running.len() - recent.len();
+    let older = ralphs
+        .len()
+        .saturating_sub(running.len())
+        .saturating_sub(recent.len());
     let sessions: Vec<_> = all.iter().filter(|l| l.kind != "ralph").collect();
 
     // ── Title ──────────────────────────────────────────────────────────────
