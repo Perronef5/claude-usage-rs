@@ -187,11 +187,16 @@ pub fn collect_loops(extra_roots: &[PathBuf], cache: &mut ScanCache) -> Vec<Loop
     }
 
     loops.sort_by(|a, b| {
-        (b.running, b.kind == "ralph" || b.kind == "goal", b.updated.clone()).cmp(&(
-            a.running,
-            a.kind == "ralph" || a.kind == "goal",
-            a.updated.clone(),
-        ))
+        (
+            b.running,
+            b.kind == "ralph" || b.kind == "goal",
+            b.updated.clone(),
+        )
+            .cmp(&(
+                a.running,
+                a.kind == "ralph" || a.kind == "goal",
+                a.updated.clone(),
+            ))
     });
     loops
 }
@@ -248,7 +253,7 @@ fn walk_for_ralph(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
-    for e in entries.filter_map(|e| e.ok()) {
+    for e in entries.filter_map(std::result::Result::ok) {
         let name = e.file_name();
         let name = name.to_string_lossy();
         if name.starts_with('.') || name == "node_modules" || name == "target" {
@@ -319,7 +324,7 @@ fn parse_ralph(proj: &Path) -> Option<LoopInfo> {
     let lock_pid = lock
         .as_ref()
         .and_then(|l| l.get("pid"))
-        .and_then(|p| p.as_u64())
+        .and_then(serde_json::Value::as_u64)
         .map(|p| p as u32);
     let running = lock_pid.is_some_and(pid_alive);
 
@@ -380,17 +385,21 @@ fn parse_ralph(proj: &Path) -> Option<LoopInfo> {
         };
         let Some(stats) = stats else { continue };
         iterations.push(IterationStat {
-            n: e.get("iteration").and_then(|i| i.as_u64()).unwrap_or(0),
-            duration_ms: stats.get("duration_ms").and_then(|v| v.as_u64()),
-            cost_usd: stats.get("cost_usd").and_then(|v| v.as_f64()),
-            num_turns: stats.get("num_turns").and_then(|v| v.as_u64()),
-            context_pct: stats.get("context_pct").and_then(|v| v.as_f64()),
-            output_tokens: stats.get("output_tokens").and_then(|v| v.as_u64()),
+            n: e.get("iteration")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+            duration_ms: stats.get("duration_ms").and_then(serde_json::Value::as_u64),
+            cost_usd: stats.get("cost_usd").and_then(serde_json::Value::as_f64),
+            num_turns: stats.get("num_turns").and_then(serde_json::Value::as_u64),
+            context_pct: stats.get("context_pct").and_then(serde_json::Value::as_f64),
+            output_tokens: stats
+                .get("output_tokens")
+                .and_then(serde_json::Value::as_u64),
         });
     }
     let iteration = raw_events
         .iter()
-        .filter_map(|e| e.get("iteration").and_then(|i| i.as_u64()))
+        .filter_map(|e| e.get("iteration").and_then(serde_json::Value::as_u64))
         .max();
     let cost_usd = {
         let c: f64 = iterations.iter().filter_map(|i| i.cost_usd).sum();
@@ -527,16 +536,30 @@ fn event_out(e: &Value) -> EventOut {
             // ralph reports zeros for fields it can't measure (e.g. cost on a
             // subscription backend) — show only what carries signal
             let mut parts = vec![fmt_ms(
-                st.get("duration_ms").and_then(|x| x.as_u64()).unwrap_or(0),
+                st.get("duration_ms")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
             )];
-            if let Some(t) = st.get("num_turns").and_then(|x| x.as_u64()).filter(|&t| t > 0) {
-                parts.push(format!("{} turns", t));
+            if let Some(t) = st
+                .get("num_turns")
+                .and_then(serde_json::Value::as_u64)
+                .filter(|&t| t > 0)
+            {
+                parts.push(format!("{t} turns"));
             }
-            if let Some(c) = st.get("cost_usd").and_then(|x| x.as_f64()).filter(|&c| c > 0.0) {
-                parts.push(format!("${:.2}", c));
+            if let Some(c) = st
+                .get("cost_usd")
+                .and_then(serde_json::Value::as_f64)
+                .filter(|&c| c > 0.0)
+            {
+                parts.push(format!("${c:.2}"));
             }
-            if let Some(p) = st.get("context_pct").and_then(|x| x.as_f64()).filter(|&p| p > 0.0) {
-                parts.push(format!("ctx {:.0}%", p));
+            if let Some(p) = st
+                .get("context_pct")
+                .and_then(serde_json::Value::as_f64)
+                .filter(|&p| p > 0.0)
+            {
+                parts.push(format!("ctx {p:.0}%"));
             }
             parts.join(" · ")
         }
@@ -545,7 +568,7 @@ fn event_out(e: &Value) -> EventOut {
     };
     EventOut {
         ts: e.get("ts").and_then(|t| t.as_str()).map(String::from),
-        iteration: e.get("iteration").and_then(|i| i.as_u64()),
+        iteration: e.get("iteration").and_then(serde_json::Value::as_u64),
         topic,
         text,
     }
@@ -556,7 +579,7 @@ fn stage_titles(ralph: &Path) -> HashMap<u32, String> {
     let Ok(entries) = fs::read_dir(ralph) else {
         return out;
     };
-    for e in entries.filter_map(|e| e.ok()) {
+    for e in entries.filter_map(std::result::Result::ok) {
         let name = e.file_name();
         let name = name.to_string_lossy().into_owned();
         let Some(n) = name
@@ -570,7 +593,7 @@ fn stage_titles(ralph: &Path) -> HashMap<u32, String> {
             .ok()
             .and_then(|s| s.lines().next().map(String::from))
             .and_then(|l| extract_title(&l));
-        out.insert(n, title.unwrap_or_else(|| format!("stage {}", n)));
+        out.insert(n, title.unwrap_or_else(|| format!("stage {n}")));
     }
     out
 }
@@ -589,7 +612,7 @@ fn parse_stage_number(text: &str) -> Option<u32> {
     let digits: String = rest
         .trim_start()
         .chars()
-        .take_while(|c| c.is_ascii_digit())
+        .take_while(char::is_ascii_digit)
         .collect();
     digits.parse().ok()
 }
@@ -599,7 +622,7 @@ fn parse_step(text: &str) -> Option<(u32, u32)> {
     let i = text.find("step ")?;
     let rest = &text[i + 5..];
     let (a, rest) = rest.split_once('/')?;
-    let b: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let b: String = rest.chars().take_while(char::is_ascii_digit).collect();
     Some((a.trim().parse().ok()?, b.parse().ok()?))
 }
 
@@ -692,7 +715,7 @@ fn parse_sessions(cache: &mut ScanCache) -> Vec<LoopInfo> {
         return vec![];
     };
     let mut out = vec![];
-    for e in entries.filter_map(|e| e.ok()) {
+    for e in entries.filter_map(std::result::Result::ok) {
         let name = e.file_name();
         let name = name.to_string_lossy();
         // registry entries are <pid>.json; skip summaries etc.
@@ -708,7 +731,10 @@ fn parse_sessions(cache: &mut ScanCache) -> Vec<LoopInfo> {
         let Ok(v) = serde_json::from_str::<Value>(&text) else {
             continue;
         };
-        let pid = v.get("pid").and_then(|p| p.as_u64()).map(|p| p as u32);
+        let pid = v
+            .get("pid")
+            .and_then(serde_json::Value::as_u64)
+            .map(|p| p as u32);
         if !pid.is_some_and(pid_alive) {
             continue; // stale registry entry
         }
@@ -717,7 +743,11 @@ fn parse_sessions(cache: &mut ScanCache) -> Vec<LoopInfo> {
             .and_then(|s| s.as_str())
             .unwrap_or("")
             .to_string();
-        let cwd = v.get("cwd").and_then(|c| c.as_str()).unwrap_or("").to_string();
+        let cwd = v
+            .get("cwd")
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .to_string();
         let status = v.get("status").and_then(|s| s.as_str()).map(String::from);
 
         // Transcript: ~/.claude/projects/<cwd with non-alnum → '-'>/<id>.jsonl
@@ -728,23 +758,23 @@ fn parse_sessions(cache: &mut ScanCache) -> Vec<LoopInfo> {
         let transcript = config_dir
             .join("projects")
             .join(&munged)
-            .join(format!("{}.jsonl", session_id));
+            .join(format!("{session_id}.jsonl"));
         let scan = cache.entry(transcript.clone()).or_default();
         scan_transcript(&transcript, scan);
 
         let updated = scan.last_ts.clone().or_else(|| {
             v.get("updatedAt")
-                .and_then(|u| u.as_i64())
+                .and_then(serde_json::Value::as_i64)
                 .and_then(epoch_ms_to_rfc3339)
         });
         let started = v
             .get("startedAt")
-            .and_then(|s| s.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .and_then(epoch_ms_to_rfc3339);
         let has_goal = scan.goal.is_some();
 
         out.push(LoopInfo {
-            id: format!("session:{}", session_id),
+            id: format!("session:{session_id}"),
             kind: if has_goal { "goal" } else { "session" }.into(),
             name: v
                 .get("name")
@@ -896,7 +926,7 @@ fn find_tag(line: &str, open: &str, close: &str) -> Option<String> {
     let s = line.find(open)? + open.len();
     let e = line[s..].find(close)? + s;
     let frag = &line[s..e];
-    serde_json::from_str::<String>(&format!("\"{}\"", frag)).ok()
+    serde_json::from_str::<String>(&format!("\"{frag}\"")).ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -935,7 +965,7 @@ pub fn dismiss(id_or_name: &str) -> anyhow::Result<()> {
     let target = all
         .iter()
         .find(|l| l.id == id_or_name || l.name == id_or_name)
-        .ok_or_else(|| anyhow::anyhow!("no loop matches '{}'", id_or_name))?;
+        .ok_or_else(|| anyhow::anyhow!("no loop matches '{id_or_name}'"))?;
     let mut dismissed = load_dismissed();
     dismissed.insert(target.id.clone(), Utc::now().to_rfc3339());
     // drop stale entries whose loop no longer exists
@@ -951,9 +981,11 @@ pub fn dismiss(id_or_name: &str) -> anyhow::Result<()> {
 /// must never take down an unrelated process.
 pub fn quit_session(pid: u32) -> anyhow::Result<()> {
     let config_dir = crate::claude_config_dir().ok_or_else(|| anyhow::anyhow!("HOME not set"))?;
-    let reg = config_dir.join("sessions").join(format!("{}.json", pid));
+    let reg = config_dir.join("sessions").join(format!("{pid}.json"));
     if !reg.is_file() {
-        return Err(anyhow::anyhow!("pid {} is not a registered Claude session", pid));
+        return Err(anyhow::anyhow!(
+            "pid {pid} is not a registered Claude session"
+        ));
     }
     let cmdline = std::process::Command::new("ps")
         .args(["-p", &pid.to_string(), "-o", "command="])
@@ -967,18 +999,19 @@ pub fn quit_session(pid: u32) -> anyhow::Result<()> {
             cmdline.trim()
         ));
     }
-    std::process::Command::new("kill").arg(pid.to_string()).output()?;
+    std::process::Command::new("kill")
+        .arg(pid.to_string())
+        .output()?;
     for _ in 0..6 {
         std::thread::sleep(std::time::Duration::from_millis(500));
         if !pid_alive(pid) {
             let _ = fs::remove_file(&reg); // tidy the registry entry it left behind
-            println!("Session {} quit. Its transcript is saved; `claude --resume` restores it.", pid);
+            println!("Session {pid} quit. Its transcript is saved; `claude --resume` restores it.");
             return Ok(());
         }
     }
     Err(anyhow::anyhow!(
-        "sent SIGTERM but pid {} is still running — it may be mid-task",
-        pid
+        "sent SIGTERM but pid {pid} is still running — it may be mid-task"
     ))
 }
 
@@ -997,7 +1030,7 @@ fn truncate(s: &str, max: usize) -> String {
         s.to_string()
     } else {
         let t: String = s.chars().take(max).collect();
-        format!("{}…", t)
+        format!("{t}…")
     }
 }
 
@@ -1008,7 +1041,7 @@ fn fmt_ms(ms: u64) -> String {
     } else if s >= 60 {
         format!("{}m {}s", s / 60, s % 60)
     } else {
-        format!("{}s", s)
+        format!("{s}s")
     }
 }
 
@@ -1052,10 +1085,10 @@ pub fn print_loops(loops: &[LoopInfo]) {
             let stage = l.stage.as_ref().map(|s| {
                 let mut txt = format!("stage {}/{}", s.current, s.total);
                 if let Some(t) = &s.title {
-                    txt.push_str(&format!(" — {}", t));
+                    txt.push_str(&format!(" — {t}"));
                 }
                 if let (Some(a), Some(b)) = (s.step, s.step_total) {
-                    txt.push_str(&format!(" · step {}/{}", a, b));
+                    txt.push_str(&format!(" · step {a}/{b}"));
                 }
                 txt
             });
@@ -1064,17 +1097,17 @@ pub fn print_loops(loops: &[LoopInfo]) {
                 extras.push(s);
             }
             if let Some(i) = l.iteration {
-                extras.push(format!("it {}", i));
+                extras.push(format!("it {i}"));
             }
             if let Some(c) = l.cost_usd {
-                extras.push(format!("${:.2}", c));
+                extras.push(format!("${c:.2}"));
             }
             if !l.running {
                 extras.push(l.state.clone());
                 // the reason repeats the state for clean exits — only show it
                 // when it adds information (e.g. consecutive_failures)
                 if let Some(r) = l.terminate_reason.as_ref().filter(|r| **r != l.state) {
-                    extras.push(format!("({})", r));
+                    extras.push(format!("({r})"));
                 }
             }
             if let Some(u) = &l.updated {
@@ -1127,21 +1160,29 @@ mod tests {
 
     #[test]
     fn stage_number_from_prompts() {
-        assert_eq!(parse_stage_number("Implement STAGE 14 ONLY of x — y."), Some(14));
+        assert_eq!(
+            parse_stage_number("Implement STAGE 14 ONLY of x — y."),
+            Some(14)
+        );
         assert_eq!(parse_stage_number("Continue STAGE 1 of x — y."), Some(1));
         assert_eq!(parse_stage_number("Polish the showcase video."), None);
     }
 
     #[test]
     fn step_from_build_done() {
-        assert_eq!(parse_step("collection stage 5 step 1/6: tables"), Some((1, 6)));
+        assert_eq!(
+            parse_step("collection stage 5 step 1/6: tables"),
+            Some((1, 6))
+        );
         assert_eq!(parse_step("all gates pass"), None);
     }
 
     #[test]
     fn title_from_prompt_head() {
         assert_eq!(
-            extract_title("Implement STAGE 14 ONLY of .ralph/specs/collection/ — tour-founder-bar."),
+            extract_title(
+                "Implement STAGE 14 ONLY of .ralph/specs/collection/ — tour-founder-bar."
+            ),
             Some("tour-founder-bar".into())
         );
         assert_eq!(extract_title("no dash here"), None);
@@ -1163,7 +1204,10 @@ mod tests {
             r#"{"type":"user","timestamp":"2026-08-10T12:00:00Z","message":{"role":"user","content":"<command-name>/goal</command-name>\n<command-args>ship the tour to the founder</command-args>"}}"#,
             &mut s,
         );
-        assert_eq!(s.goal.as_ref().map(|g| g.text.as_str()), Some("ship the tour to the founder"));
+        assert_eq!(
+            s.goal.as_ref().map(|g| g.text.as_str()),
+            Some("ship the tour to the founder")
+        );
 
         // the tag merely mentioned mid-conversation must NOT register
         let mut s2 = ScanState::default();

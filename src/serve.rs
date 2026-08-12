@@ -23,9 +23,9 @@ const DASHBOARD_HTML: &str = include_str!("../assets/dashboard.html");
 
 pub fn serve(port: u16, roots: Vec<PathBuf>, open: bool) -> Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", port))
-        .with_context(|| format!("failed to bind 127.0.0.1:{}", port))?;
-    let url = format!("http://127.0.0.1:{}", port);
-    println!("🔁 Loop dashboard: {}", url);
+        .with_context(|| format!("failed to bind 127.0.0.1:{port}"))?;
+    let url = format!("http://127.0.0.1:{port}");
+    println!("🔁 Loop dashboard: {url}");
     println!("   Scanning: .ralph loops + ~/.claude/sessions (refresh every few seconds)");
 
     if open {
@@ -49,11 +49,7 @@ pub fn serve(port: u16, roots: Vec<PathBuf>, open: bool) -> Result<()> {
     Ok(())
 }
 
-fn handle(
-    mut stream: TcpStream,
-    roots: &[PathBuf],
-    cache: &Mutex<loops::ScanCache>,
-) -> Result<()> {
+fn handle(mut stream: TcpStream, roots: &[PathBuf], cache: &Mutex<loops::ScanCache>) -> Result<()> {
     let mut buf = Vec::with_capacity(2048);
     let mut chunk = [0u8; 2048];
     // Read until end of headers
@@ -107,7 +103,10 @@ fn handle(
         }
         ("POST", "/api/awake") => {
             let req: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
-            let on = req.get("on").and_then(|v| v.as_bool()).unwrap_or(false);
+            let on = req
+                .get("on")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
             let warning = if on {
                 // never lid mode from the web UI — that path needs sudo
                 awake::turn_on(None, false).err().map(|e| e.to_string())
@@ -156,7 +155,5 @@ fn respond(stream: &mut TcpStream, code: u16, ctype: &str, body: &str) -> Result
 }
 
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|w| w == needle)
+    haystack.windows(needle.len()).position(|w| w == needle)
 }

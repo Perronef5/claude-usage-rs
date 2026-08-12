@@ -277,7 +277,11 @@ fn save_statusline_cache(cc: &StatuslineInput, now: DateTime<Utc>) {
             sid.to_string(),
             SessionCost {
                 cost_usd: cost,
-                duration_ms: cc.cost.as_ref().and_then(|x| x.total_duration_ms).unwrap_or(0),
+                duration_ms: cc
+                    .cost
+                    .as_ref()
+                    .and_then(|x| x.total_duration_ms)
+                    .unwrap_or(0),
                 updated: now.to_rfc3339(),
             },
         );
@@ -1205,12 +1209,10 @@ fn main() -> Result<()> {
                 awake::turn_on(secs, lid)?;
                 awake::print_status();
             }
-            Some(AwakeCmd::Off) => {
-                match awake::turn_off()? {
-                    Some(warning) => println!("⚠️  {}", warning),
-                    None => println!("💤 Keep-awake stopped."),
-                }
-            }
+            Some(AwakeCmd::Off) => match awake::turn_off()? {
+                Some(warning) => println!("⚠️  {}", warning),
+                None => println!("💤 Keep-awake stopped."),
+            },
             Some(AwakeCmd::Status) | None => awake::print_status(),
         }
         return Ok(());

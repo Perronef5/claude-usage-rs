@@ -41,7 +41,7 @@ fn clean(s: &str) -> String {
 }
 
 fn sf(name: &str) -> String {
-    format!(" sfimage={}", name)
+    format!(" sfimage={name}")
 }
 
 fn exe() -> String {
@@ -108,9 +108,11 @@ fn print_usage(now: chrono::DateTime<chrono::Utc>) {
         if !s.active_windows.is_empty() {
             // "1x off-peak" reads like a bug — name the multiplier only when
             // it actually multiplies
-            let mult = (s.multiplier != 1.0)
-                .then(|| format!("{:.0}x ", s.multiplier))
-                .unwrap_or_default();
+            let mult = if s.multiplier != 1.0 {
+                format!("{:.0}x ", s.multiplier)
+            } else {
+                Default::default()
+            };
             if s.favorable {
                 lines.push(format!(
                     "{}off-peak · ends in {} |{} sfcolor=#0a8f0a color=#0a8f0a",
@@ -174,7 +176,7 @@ fn print_usage(now: chrono::DateTime<chrono::Utc>) {
                 let delta = pct - pace;
                 let word = if delta > 1.0 { "ahead" } else { "behind" };
                 if delta.abs() > 1.0 {
-                    lines.push(format!("pace: {} ({:+.0}%) | size=12", word, delta));
+                    lines.push(format!("pace: {word} ({delta:+.0}%) | size=12"));
                 }
             }
         }
@@ -208,7 +210,7 @@ fn print_usage(now: chrono::DateTime<chrono::Utc>) {
                         )
                     })
                     .unwrap_or_default();
-                lines.push(format!("{} ~${:.2}{}", label, total, rate));
+                lines.push(format!("{label} ~${total:.2}{rate}"));
             }
         } else if age_mins < i64::MAX {
             lines.push(format!(
@@ -250,7 +252,7 @@ fn print_usage(now: chrono::DateTime<chrono::Utc>) {
     if !lines.is_empty() {
         println!("Claude Usage | size=11");
         for l in lines {
-            println!("{}", l);
+            println!("{l}");
         }
         println!("---");
     }
@@ -312,7 +314,7 @@ pub fn run_menubar() {
         if let Some(s) = &l.stage {
             text.push_str(&format!("  ·  stage {}/{}", s.current, s.total));
             if let Some(t) = &s.title {
-                text.push_str(&format!(" — {}", t));
+                text.push_str(&format!(" — {t}"));
             }
         } else if !l.running {
             text.push_str(&format!("  ·  {}", l.state));
@@ -380,13 +382,13 @@ pub fn run_menubar() {
             );
             if let Some(s) = &l.stage {
                 if let (Some(a), Some(b)) = (s.step, s.step_total) {
-                    bar.push_str(&format!(" · step {}/{}", a, b));
+                    bar.push_str(&format!(" · step {a}/{b}"));
                 }
                 if let Some(i) = l.iteration {
-                    bar.push_str(&format!(" · it {}", i));
+                    bar.push_str(&format!(" · it {i}"));
                 }
             }
-            println!("{} | size=12", bar);
+            println!("{bar} | size=12");
         }
     }
     if older > 0 {
@@ -395,7 +397,7 @@ pub fn run_menubar() {
         } else {
             ""
         };
-        println!("{} older in the dashboard | size=12{}", older, action);
+        println!("{older} older in the dashboard | size=12{action}");
     }
 
     // ── Sessions ───────────────────────────────────────────────────────────
@@ -463,8 +465,7 @@ pub fn run_menubar() {
                 sf("moon.zzz")
             );
             println!(
-                "-- with closed-lid support (sudo) | bash=\"{}\" param1=awake param2=on param3=--lid terminal=true refresh=true",
-                exe
+                "-- with closed-lid support (sudo) | bash=\"{exe}\" param1=awake param2=on param3=--lid terminal=true refresh=true"
             );
         }
     }

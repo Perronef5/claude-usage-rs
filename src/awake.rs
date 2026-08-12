@@ -86,7 +86,7 @@ pub fn turn_on(duration_secs: Option<u64>, lid: bool) -> Result<AwakeState> {
     .stdout(Stdio::null())
     .stderr(Stdio::null())
     .spawn()
-    .map_err(|e| anyhow!("failed to start sleep blocker: {}", e))?;
+    .map_err(|e| anyhow!("failed to start sleep blocker: {e}"))?;
 
     if lid {
         #[cfg(target_os = "macos")]
@@ -109,8 +109,7 @@ pub fn turn_on(duration_secs: Option<u64>, lid: bool) -> Result<AwakeState> {
     let state = AwakeState {
         pid: child.id(),
         started: now.to_rfc3339(),
-        until: duration_secs
-            .map(|s| (now + chrono::Duration::seconds(s as i64)).to_rfc3339()),
+        until: duration_secs.map(|s| (now + chrono::Duration::seconds(s as i64)).to_rfc3339()),
         lid,
         method: if cfg!(target_os = "macos") {
             "caffeinate".into()
@@ -180,18 +179,18 @@ pub fn parse_duration(s: &str) -> Result<u64> {
         } else {
             let n: u64 = num
                 .parse()
-                .map_err(|_| anyhow!("bad duration: {} (use 8h, 90m, 2h30m)", s))?;
+                .map_err(|_| anyhow!("bad duration: {s} (use 8h, 90m, 2h30m)"))?;
             total += match c {
                 'h' => n * 3600,
                 'm' => n * 60,
                 's' => n,
-                _ => return Err(anyhow!("bad duration unit '{}' (use h, m, s)", c)),
+                _ => return Err(anyhow!("bad duration unit '{c}' (use h, m, s)")),
             };
             num.clear();
         }
     }
     if !num.is_empty() {
-        return Err(anyhow!("bad duration: {} (trailing number)", s));
+        return Err(anyhow!("bad duration: {s} (trailing number)"));
     }
     if total == 0 {
         return Err(anyhow!("duration must be > 0"));
@@ -212,7 +211,12 @@ pub fn print_status() {
                 .until
                 .as_deref()
                 .and_then(|u| u.parse::<DateTime<Utc>>().ok())
-                .map(|t| format!(", {} left", crate::fmt_mins(((t - now).num_minutes().max(0)) as u32)))
+                .map(|t| {
+                    format!(
+                        ", {} left",
+                        crate::fmt_mins(((t - now).num_minutes().max(0)) as u32)
+                    )
+                })
                 .unwrap_or_default();
             println!(
                 "☕ Awake ({}, {} elapsed{}){}",
