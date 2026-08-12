@@ -34,6 +34,15 @@ const NATIVE_STATUS_ICON: &[u8] = include_bytes!("../native/StatusIcon-ai.svg");
 const NATIVE_CODEX_ICON: &[u8] = include_bytes!("../native/ProviderIcon-codex.svg");
 const NATIVE_CLAUDE_ICON: &[u8] = include_bytes!("../native/ProviderIcon-claude.svg");
 
+// Threshold colors — one hex per level, shared by the meter lines (via
+// usage_color) and the fixed-semantic lines (off-peak/peak/incident). See
+// usage_color for the light/dark-legibility rationale behind the values.
+const GREEN: &str = "#0a8f0a";
+const AMBER: &str = "#b37400";
+const RED: &str = "#d64545";
+
+const WEEK_SECS: i64 = 604_800;
+
 /// SwiftBar item text must not contain the param delimiter, newlines, or
 /// double quotes (which would close a quoted param value).
 fn clean(s: &str) -> String {
@@ -88,11 +97,11 @@ fn pct_meter(pct: f64) -> String {
 /// SF Symbol dot doubles the cue so the state never rides on text tint alone.
 fn usage_color(pct: f64) -> &'static str {
     if pct < 50.0 {
-        "#0a8f0a"
+        GREEN
     } else if pct < 80.0 {
-        "#b37400"
+        AMBER
     } else {
-        "#d64545"
+        RED
     }
 }
 
@@ -115,8 +124,7 @@ fn print_usage(now: chrono::DateTime<chrono::Utc>) {
             };
             if s.favorable {
                 lines.push(format!(
-                    "{}off-peak · ends in {} |{} sfcolor=#0a8f0a color=#0a8f0a",
-                    mult,
+                    "{mult}off-peak · ends in {} |{} sfcolor={GREEN} color={GREEN}",
                     crate::fmt_mins_opt(s.mins_until_change),
                     sf("bolt.fill")
                 ));
@@ -129,9 +137,7 @@ fn print_usage(now: chrono::DateTime<chrono::Utc>) {
                     .next()
                     .unwrap_or(2.0);
                 lines.push(format!(
-                    "{}peak · {:.0}x in {} |{} sfcolor=#b37400 color=#b37400",
-                    mult,
-                    next,
+                    "{mult}peak · {next:.0}x in {} |{} sfcolor={AMBER} color={AMBER}",
                     crate::fmt_mins_opt(s.mins_until_favorable),
                     sf("clock")
                 ));
@@ -171,8 +177,8 @@ fn print_usage(now: chrono::DateTime<chrono::Utc>) {
         // pace verdict off the 7d window, like CodexBar's "Pace: Behind"
         if let (Some(pct), Some(ts)) = (c.seven_day_pct, c.seven_day_resets_at) {
             if ts > now_ts {
-                let elapsed = 604_800 - (ts - now_ts);
-                let pace = (elapsed as f64 / 604_800.0 * 100.0).clamp(0.0, 100.0);
+                let elapsed = WEEK_SECS - (ts - now_ts);
+                let pace = (elapsed as f64 / WEEK_SECS as f64 * 100.0).clamp(0.0, 100.0);
                 let delta = pct - pace;
                 let word = if delta > 1.0 { "ahead" } else { "behind" };
                 if delta.abs() > 1.0 {
@@ -242,7 +248,7 @@ fn print_usage(now: chrono::DateTime<chrono::Utc>) {
     if let Some(api) = crate::load_cached_api_status() {
         if api.indicator != "none" && api.indicator != "unknown" {
             lines.push(format!(
-                "API: {} |{} sfcolor=#d64545 color=#d64545 href=https://status.claude.com",
+                "API: {} |{} sfcolor={RED} color={RED} href=https://status.claude.com",
                 clean(&api.description),
                 sf("exclamationmark.triangle")
             ));

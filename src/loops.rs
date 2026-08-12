@@ -301,7 +301,7 @@ fn ralph_dirs_from_ps() -> Vec<PathBuf> {
     dirs
 }
 
-fn pid_alive(pid: u32) -> bool {
+pub(crate) fn pid_alive(pid: u32) -> bool {
     std::process::Command::new("ps")
         .args(["-p", &pid.to_string(), "-o", "pid="])
         .output()
@@ -378,12 +378,9 @@ fn parse_ralph(proj: &Path) -> Option<LoopInfo> {
         if e.get("topic").and_then(|t| t.as_str()) != Some("iteration.summary") {
             continue;
         }
-        let stats: Option<Value> = match e.get("payload") {
-            Some(Value::String(s)) => serde_json::from_str(s).ok(),
-            Some(v @ Value::Object(_)) => Some(v.clone()),
-            _ => None,
+        let Some(stats) = stats_value(e) else {
+            continue;
         };
-        let Some(stats) = stats else { continue };
         iterations.push(IterationStat {
             n: e.get("iteration")
                 .and_then(serde_json::Value::as_u64)
@@ -514,6 +511,16 @@ fn parse_ralph(proj: &Path) -> Option<LoopInfo> {
     })
 }
 
+/// iteration.summary payloads arrive as either a JSON string or an inline
+/// object; normalize both to a Value.
+fn stats_value(e: &Value) -> Option<Value> {
+    match e.get("payload") {
+        Some(Value::String(s)) => serde_json::from_str(s).ok(),
+        Some(v @ Value::Object(_)) => Some(v.clone()),
+        _ => None,
+    }
+}
+
 fn event_out(e: &Value) -> EventOut {
     let topic = e
         .get("topic")
@@ -522,15 +529,9 @@ fn event_out(e: &Value) -> EventOut {
         .to_string();
     // iteration.summary carries stats (as an object or a JSON string) —
     // compact them; everything else is prose.
-    let stats: Option<Value> = if topic == "iteration.summary" {
-        match e.get("payload") {
-            Some(Value::String(s)) => serde_json::from_str(s).ok(),
-            Some(v @ Value::Object(_)) => Some(v.clone()),
-            _ => None,
-        }
-    } else {
-        None
-    };
+    let stats = (topic == "iteration.summary")
+        .then(|| stats_value(e))
+        .flatten();
     let text = match (stats, e.get("payload")) {
         (Some(st), _) => {
             // ralph reports zeros for fields it can't measure (e.g. cost on a
@@ -1050,10 +1051,10 @@ fn epoch_ms_to_rfc3339(ms: i64) -> Option<String> {
 }
 
 pub fn ago(ts: &str, now: DateTime<Utc>) -> String {
-    let Ok(t) = ts.parse::<DateTime<chrono::FixedOffset>>() else {
+    let Some(t) = parse_ts(ts) else {
         return "?".into();
     };
-    let secs = (now - t.with_timezone(&Utc)).num_seconds().max(0);
+    let secs = (now - t).num_seconds().max(0);
     match secs {
         s if s < 60 => "just now".into(),
         s if s < 3600 => format!("{}m ago", s / 60),
